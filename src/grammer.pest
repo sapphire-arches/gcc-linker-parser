@@ -1,0 +1,106 @@
+file = { archive_members ~ blank_line ~ discarded_input_sections ~ blank_line ~ memory_configuration ~ blank_line ~ linker_script_map ~ cross_reference_table }
+
+archive_members = {
+    "Archive member included to satisfy reference by file (symbol)\n" ~ blank_line ~ archive_member+
+}
+
+archive_member = {
+    object_name ~ NEWLINE ~ " "+ ~ object_name ~ " (symbol from plugin)"? ~ " (" ~ symbol_name ~ ")\n"
+}
+
+discarded_input_sections = {
+    "Discarded input sections\n" ~ blank_line ~ discarded_input_section+
+}
+
+discarded_input_section = {
+    " "+ ~ section_name ~ NEWLINE? ~ " "+ ~ section_offset ~ " "+ ~ section_size ~ " "+ ~ object_name ~ NEWLINE
+}
+
+memory_configuration = {
+    "Memory Configuration\n\nName" ~ " "+ ~ "Origin" ~ " "+ ~ "Length" ~ " "+ ~ "Attributes\n" ~ memory_block+
+}
+
+memory_block = {
+    memory_name ~ " "+ ~ memory_origin ~ " "+ ~ memory_length ~ " "* ~ memory_attributes ~ "\n"
+}
+
+memory_name       =  { (ASCII_ALPHANUMERIC | "*")+ }
+memory_origin     = @{ hex_number }
+memory_length     = @{ hex_number }
+memory_attributes =  { 'a'..'z'* }
+
+linker_script_map = {
+    "Linker script and memory map\n" ~ blank_line ~ (
+          linker_directive
+        | (mmap_section ~ "\n" )
+        | blank_line
+    )+
+}
+
+linker_directive             = { linker_directive_load | linker_directive_start_group | linker_directive_end_group | linker_directive_output }
+linker_directive_load        = {
+  "LOAD linker stubs\n" |
+  ("LOAD " ~ (filename) ~ "\n")
+}
+linker_directive_start_group = { "START GROUP\n" }
+linker_directive_end_group   = { "END GROUP\n" }
+linker_directive_output      = { "OUTPUT" ~ (not_newline+) ~ "\n" }
+
+mmap_section               = {
+  (
+      mmap_section_fill
+    | mmap_section_glob
+    | mmap_section_with_size
+    | mmap_section_with_address
+    | mmap_section_with_brackets
+  )
+}
+mmap_section_fill          = {
+    " *fill*         0x" ~ mmap_section_address ~ " "+ ~ mmap_section_size ~ " "*
+}
+mmap_section_glob          = { " *" ~ filename? ~ section_glob }
+mmap_section_with_size     = {
+    " "{34,} ~ hex_number ~ " (size before relaxing)"
+}
+mmap_section_with_address  = {
+    mmap_section_name ~ mmap_section_address ~ " "+ ~ ((mmap_section_size ~ " " ~ mmap_entry) | mmap_symbol_name)
+}
+mmap_entry                 = {
+    linker_stubs
+  | object_name
+  | mmap_symbol_name
+}
+mmap_section_with_brackets = {
+    " "+ ~ "[" ~ (not_newline)+
+}
+mmap_section_name          = {
+    ("\n"? ~ (not_newline{16}) ~ "0x")
+  | ((not_newline)+ ~ "\n                0x")
+}
+mmap_section_address       = { (ASCII_HEX_DIGIT)+ }
+mmap_section_size          = { hex_number }
+mmap_symbol_name           = { not_newline+ }
+linker_stubs               = { "linker stubs" }
+
+cross_reference_table = {
+    "Cross Reference Table\n\nSymbol" ~ " "+ ~ "File\n"
+}
+
+section_glob   =  {
+    "(" ~ (!")" ~ ((section_glob ~ ")") | ANY))+ ~ ")"
+}
+section_name   =  { (ASCII_ALPHANUMERIC | "_" | "." | "*" | "(" | ")")+ }
+section_offset = @{ hex_number }
+section_size   = @{ hex_number }
+
+symbol_reason = { "symbol from plugin" }
+symbol_name   = { not_paren_newline+ }
+
+object_name  =  { (archive_name ~ "(" ~ filename ~ ")") | filename }
+archive_name = @{ filename }
+filename     =  { (ASCII_ALPHANUMERIC | "/" | "." | "_" | "-" | "+")+ }
+
+hex_number        =  { "0x" ~ ASCII_HEX_DIGIT+ }
+not_newline       = _{ !"\n" ~ ANY }
+not_paren_newline = _{ !")\n" ~ ANY }
+blank_line        = _{ NEWLINE }
