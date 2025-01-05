@@ -5,7 +5,8 @@ archive_members = {
 }
 
 archive_member = {
-    object_name ~ NEWLINE ~ " "+ ~ object_name ~ " (symbol from plugin)"? ~ " (" ~ symbol_name ~ ")\n"
+    object_name ~ NEWLINE
+    ~ " "+ ~ (object_name ~ " ")? ~ "(symbol from plugin) "? ~ "(" ~ symbol_name ~ ")\n"
 }
 
 discarded_input_sections = {
