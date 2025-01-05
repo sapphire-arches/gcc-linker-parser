@@ -88,7 +88,7 @@ fn process_mmap_section(state: &mut MapFile, contents: Pair<Rule>) -> Result<()>
                         if let Some(pair) = pair.into_inner().next() {
                             match pair.as_rule() {
                                 Rule::mmap_symbol_name => name = Some(pair.as_str().to_owned()),
-                                Rule::object_name | Rule::linker_stubs => {
+                                Rule::object_name | Rule::linker_stubs | Rule::load_address => {
                                     // This is an overall section header, we don't need to generate
                                     // a symbol for it
                                     return Ok(());

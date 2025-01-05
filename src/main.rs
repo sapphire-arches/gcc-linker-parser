@@ -32,7 +32,13 @@ fn main() -> Result<()> {
     let b_symbols = b_maps.compute_symbol_sizes();
 
     let mut all_symbol_names: Vec<_> = a_symbols.keys().chain(b_symbols.keys()).collect();
-    all_symbol_names.sort();
+    all_symbol_names.sort_by_key(|symbol| {
+        let symbol: &str = symbol.as_ref();
+        let os: i64 = a_symbols.get(symbol).copied().unwrap_or_default() as i64;
+        let ns: i64 = b_symbols.get(symbol).copied().unwrap_or_default() as i64;
+
+        ns - os
+    });
     all_symbol_names.dedup();
 
     for symbol in all_symbol_names {
