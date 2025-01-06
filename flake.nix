@@ -1,6 +1,6 @@
 {
   inputs = {
-    fenix = {
+    fenix-module = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
@@ -12,7 +12,7 @@
     {
       self,
       flake-utils,
-      fenix,
+      fenix-module,
       nixpkgs,
     }:
     (flake-utils.lib.eachDefaultSystem (
@@ -20,18 +20,22 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ fenix.overlays.default ];
+          overlays = [ fenix-module.overlays.default ];
         };
       in
       {
+        inherit pkgs;
         devShells.default = pkgs.mkShell {
           name = "linker-parser-dev";
 
           buildInputs = with pkgs; [
-            (fenix.complete.withComponents [
-            "cargo" "rust-src" "rustc" "rustfmt"
+            (fenix.stable.withComponents [
+              "cargo"
+              "rust-src"
+              "rustc"
+              "rustfmt"
             ])
-            rust-analyzer
+            rust-analyzer-nightly
           ];
         };
       }
