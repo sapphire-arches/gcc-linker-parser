@@ -25,11 +25,19 @@ fn main() -> Result<()> {
 
     println!("{:?} {:?}", a_maps, b_maps);
 
-    let mut a_maps = symbol_sizes(a_maps.into()).context("Parse baseline")?;
-    let mut b_maps = symbol_sizes(b_maps.into()).context("Parse new")?;
+    let a_maps = symbol_sizes(a_maps.into()).context("Parse baseline")?;
+    let b_maps = symbol_sizes(b_maps.into()).context("Parse new")?;
 
-    let a_symbols = a_maps.compute_symbol_sizes();
-    let b_symbols = b_maps.compute_symbol_sizes();
+    let a_symbols: HashMap<String, u64> = a_maps
+        .symbols
+        .iter()
+        .map(|sym| (sym.name.clone(), sym.size))
+        .collect();
+    let b_symbols: HashMap<String, u64> = b_maps
+        .symbols
+        .iter()
+        .map(|sym| (sym.name.clone(), sym.size))
+        .collect();
 
     let mut all_symbol_names: Vec<_> = a_symbols.keys().chain(b_symbols.keys()).collect();
     all_symbol_names.sort_by_key(|symbol| {

@@ -33,7 +33,8 @@ memory_attributes =  { 'a'..'z'* }
 linker_script_map = {
     "Linker script and memory map\n" ~ blank_line ~ (
           linker_directive
-        | (mmap_section ~ "\n" )
+        | mmap_section
+        | mmap_section_glob
         | blank_line
     )+
 }
@@ -49,43 +50,24 @@ linker_directive_output      = { "OUTPUT" ~ (not_newline+) ~ "\n" }
 linker_directive_discard     = { "/DISCARD/" ~ (discard_pattern)+ }
 discard_pattern              = { "\n " ~ section_name }
 
-mmap_section               = {
-  (
-      mmap_section_fill
-    | mmap_section_glob
-    | mmap_section_with_size
-    | mmap_section_with_address
-    | mmap_section_with_brackets
-  )
+mmap_section            = {
+    mmap_section_name ~ (mmap_section_address | mmap_provide_spec) ~ mmap_section_size ~ ((mmap_source ~ mmap_relax_size) | (mmap_source?)) ~ "\n"
 }
-mmap_section_fill          = {
-    " *fill*         0x" ~ mmap_section_address ~ " "+ ~ mmap_section_size ~ " "*
+mmap_section_name       = {
+    ((" "? ~ section_name ~ ((" "+) | (NEWLINE ~ " "{16}))) | mmap_section_name_blank)
 }
-mmap_section_glob          = { " *" ~ filename? ~ section_glob }
-mmap_section_with_size     = {
-    " "{30,36} ~ hex_number ~ " (size before relaxing)"
+mmap_section_name_blank = { "                " ~ &(mmap_section_address | mmap_provide_spec) }
+mmap_section_address    = { hex_number }
+mmap_provide_spec		= { "[!provide]" }
+mmap_section_size       = {
+    " "{11}
+  | (" "+ ~ hex_number)
 }
-mmap_section_with_address  = {
-    mmap_section_name ~ mmap_section_address ~ " "+ ~ ((mmap_section_size ~ " " ~ mmap_entry) | mmap_symbol_name)
-}
-mmap_entry                 = {
-    linker_stubs
-  | load_address
-  | object_name
-  | mmap_symbol_name
-}
-mmap_section_with_brackets = {
-    " "+ ~ "[" ~ (not_newline)+
-}
-mmap_section_name          = {
-    ("\n"? ~ (not_newline{16}) ~ "0x")
-  | ((not_newline)+ ~ "\n                0x")
-}
-mmap_section_address       = { (ASCII_HEX_DIGIT)+ }
-mmap_section_size          = { hex_number }
-mmap_symbol_name           = { not_newline+ }
-linker_stubs               = { "linker stubs" }
-load_address               = { "load address " ~ hex_number }
+mmap_source             = { " "+ ~ mmap_source_name }
+mmap_source_name        = { not_newline* }
+mmap_relax_size         = { NEWLINE ~ " "{27,} ~ hex_number ~ " (size before relaxing)" }
+
+mmap_section_glob = { " *" ~ filename? ~ section_glob }
 
 cross_reference_table = {
     "Cross Reference Table\n\nSymbol" ~ " "+ ~ "File\n"
@@ -105,7 +87,8 @@ object_name  =  { (archive_name ~ "(" ~ filename ~ ")") | filename }
 archive_name = @{ filename }
 filename     =  { (ASCII_ALPHANUMERIC | "/" | "." | "_" | "-" | "+")+ }
 
-hex_number        =  { "0x" ~ ASCII_HEX_DIGIT+ }
+hex_number        =  { "0x" ~ hex_number_digits }
+hex_number_digits =  { ASCII_HEX_DIGIT+ }
 not_newline       = _{ !"\n" ~ ANY }
 not_paren_newline = _{ !")\n" ~ ANY }
 blank_line        = _{ NEWLINE }

@@ -13,7 +13,8 @@ struct MapParser;
 
 #[derive(Debug)]
 pub(crate) struct Symbol {
-    pub location: u64,
+    pub address: u64,
+    pub size: u64,
     pub name: String,
 }
 
@@ -22,16 +23,21 @@ pub(crate) struct MapFile {
     pub padding: u64,
 }
 
+struct MapFileParseState {
+    out: MapFile,
+    current_symbol: Option<Symbol>,
+}
+
 impl MapFile {
     pub(crate) fn compute_symbol_sizes(&mut self) -> HashMap<String, u64> {
         self.symbols
-            .sort_unstable_by(|a, b| a.location.cmp(&b.location));
+            .sort_unstable_by(|a, b| a.address.cmp(&b.address));
         self.symbols
             .windows(2)
             .map(|symbols| {
                 let symbol = &symbols[0];
                 let next_symbol = &symbols[1];
-                let size = next_symbol.location - symbol.location;
+                let size = next_symbol.address - symbol.address;
 
                 (symbol.name.clone(), size)
             })
@@ -48,96 +54,125 @@ fn pest_error(span: pest::Span, message: impl Into<String>) -> pest::error::Erro
     )
 }
 
-fn process_mmap_section(state: &mut MapFile, contents: Pair<Rule>) -> Result<()> {
+fn hex_number_to_u64(contents: Pair<Rule>) -> Result<u64> {
+    let span = contents.as_span();
+    let inner = contents
+        .into_inner()
+        .next()
+        .ok_or_else(|| pest_error(span, "Missing hex_number_digits"))?;
+    let span = inner.as_span();
+
+    match inner.as_rule() {
+        Rule::hex_number_digits => Ok(u64::from_str_radix(inner.as_str(), 16)?),
+        rule => Err(pest_error(span, format!("bad span type {:?}", rule)).into()),
+    }
+}
+
+fn process_mmap_section_name(contents: Pair<Rule>) -> Result<Option<String>> {
     let span = contents.as_span();
     let pair = contents
         .into_inner()
         .next()
-        .ok_or_else(|| pest_error(span, "Somehow missing child in mmap_section"))?;
+        .ok_or_else(|| pest_error(span, format!("Expected section name")))?;
 
     match pair.as_rule() {
-        Rule::mmap_section_glob => Ok(()),
-        Rule::mmap_section_fill => {
-            for pair in pair.into_inner() {
-                match pair.as_rule() {
-                    Rule::mmap_section_size => {
-                        state.padding +=
-                            u64::from_str_radix(pair.as_str().split_at(2).1, 16).unwrap();
-                        return Ok(());
-                    }
-                    _ => {}
-                }
-            }
-            Err(pest_error(span, "Failed to find size").into())
-        }
-        Rule::mmap_section_with_brackets => Ok(()),
-        Rule::mmap_section_with_size => Ok(()),
-        Rule::mmap_section_with_address => {
-            let mut address = None;
-            let mut name = None;
-
-            for pair in pair.into_inner() {
-                match pair.as_rule() {
-                    Rule::mmap_section_address => {
-                        // panic safety: the hex_number rule guarantees we have a number of the
-                        // form 0x.... where .... is hex digits
-                        address =
-                            Some(u64::from_str_radix(pair.as_str().split_at(2).1, 16).unwrap())
-                    }
-                    Rule::mmap_entry => {
-                        if let Some(pair) = pair.into_inner().next() {
-                            match pair.as_rule() {
-                                Rule::mmap_symbol_name => name = Some(pair.as_str().to_owned()),
-                                Rule::object_name | Rule::linker_stubs | Rule::load_address => {
-                                    // This is an overall section header, we don't need to generate
-                                    // a symbol for it
-                                    return Ok(());
-                                }
-                                _ => {
-                                    return Err(pest_error(
-                                        span,
-                                        format!(
-                                            "Missing symbol name. Found {:?} instead",
-                                            pair.as_rule()
-                                        ),
-                                    )
-                                    .into());
-                                }
-                            }
-                        }
-                    }
-                    Rule::mmap_symbol_name => name = Some(pair.as_str().to_owned()),
-                    _ => {
-                        // Ignore other rules
-                    }
-                }
-            }
-
-            match (address, name) {
-                (Some(address), Some(name)) => {
-                    state.symbols.push(Symbol {
-                        location: address,
-                        name,
-                    });
-                    Ok(())
-                }
-                _ => Err(pest_error(span, format!("Missing address and name")).into()),
-            }
-        }
+        Rule::mmap_section_name_blank => Ok(None),
+        Rule::section_name => Ok(Some(pair.to_string())),
         _ => Err(pest_error(
-            span,
-            format!("Unknown rule {:?} in mmap_section", pair.as_rule()),
+            pair.as_span(),
+            format!("Unexpected rule {:?}", pair.as_rule()),
         )
         .into()),
     }
 }
 
-fn process_linker_script_map(state: &mut MapFile, contents: Pairs<Rule>) -> Result<()> {
+fn process_mmap_section(state: &mut MapFileParseState, contents: Pair<Rule>) -> Result<()> {
+    let span = contents.as_span();
+    let mut section_name = None;
+    let mut address = None;
+    let mut section_size = None;
+    let mut source = None;
+
+    for pair in contents.into_inner() {
+        let span = pair.as_span();
+        // mmap_section_address ~ mmap_section_size ~ (mmap_source)? ~ "\n"
+        match pair.as_rule() {
+            Rule::mmap_section_name => {
+                section_name = process_mmap_section_name(pair)?;
+            }
+            Rule::mmap_section_address => {
+                address =
+                    Some(
+                        hex_number_to_u64(pair.into_inner().next().ok_or_else(|| {
+                            pest_error(span, "Expected inner for section address")
+                        })?)
+                        .context("mmap_section_address extraction")?,
+                    )
+            }
+            Rule::mmap_section_size => section_size = pair.into_inner().next(),
+            Rule::mmap_source => source = Some(pair.as_str()),
+            _ => {}
+        }
+    }
+
+    let address = if let Some(address) = address {
+        address
+    } else {
+        // [!provide] doesn't set an address
+        return Ok(());
+    };
+
+    if let Some(mut c) = state.current_symbol.take() {
+        if address < c.address {
+            return Err(pest_error(span, "Out of order symbol").into());
+        }
+        c.size = address - c.address;
+        state.out.symbols.push(c);
+    }
+
+    if let Some(source) = source {
+        if source.starts_with("        ") {
+            // This is a linker directive
+            return Ok(());
+        }
+
+        if source.contains("/") {
+            // This is a file path
+            return Ok(());
+        }
+
+        state.current_symbol = Some(Symbol {
+            address,
+            size: 0,
+            name: source.to_string(),
+        })
+    }
+
+    Ok(())
+}
+
+fn process_linker_script_map(state: &mut MapFileParseState, contents: Pairs<Rule>) -> Result<()> {
+    let mut discarding = false;
     for pair in contents {
         match pair.as_rule() {
-            Rule::linker_directive => {}
+            Rule::linker_directive => {
+                let pair = pair.into_inner().next();
+                if let Some(pair) = pair {
+                    match pair.as_rule() {
+                        Rule::linker_directive_discard => {
+                            discarding = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             Rule::mmap_section => {
-                process_mmap_section(state, pair).context("read mmap section")?;
+                if !discarding {
+                    process_mmap_section(state, pair).context("read mmap section")?;
+                }
+            }
+            Rule::mmap_section_glob => {
+                // nothing to do with this
             }
             Rule::blank_line => {}
             _ => {
@@ -155,9 +190,12 @@ fn process_linker_script_map(state: &mut MapFile, contents: Pairs<Rule>) -> Resu
 pub(crate) fn parse_map_file(file_contents: &str) -> Result<MapFile> {
     let mut contents = MapParser::parse(Rule::file, file_contents).context("Run PEST parser")?;
 
-    let mut state = MapFile {
-        symbols: Vec::new(),
-        padding: 0,
+    let mut state = MapFileParseState {
+        out: MapFile {
+            symbols: Vec::new(),
+            padding: 0,
+        },
+        current_symbol: None,
     };
 
     let contents = contents.next().ok_or_else(|| anyhow!("No file?"))?;
@@ -175,5 +213,5 @@ pub(crate) fn parse_map_file(file_contents: &str) -> Result<MapFile> {
         }
     }
 
-    Ok(state)
+    Ok(state.out)
 }
