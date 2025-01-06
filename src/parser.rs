@@ -77,7 +77,7 @@ fn process_mmap_section_name(contents: Pair<Rule>) -> Result<Option<String>> {
 
     match pair.as_rule() {
         Rule::mmap_section_name_blank => Ok(None),
-        Rule::section_name => Ok(Some(pair.to_string())),
+        Rule::section_name => Ok(Some(pair.get_input().to_string())),
         _ => Err(pest_error(
             pair.as_span(),
             format!("Unexpected rule {:?}", pair.as_rule()),
@@ -109,7 +109,14 @@ fn process_mmap_section(state: &mut MapFileParseState, contents: Pair<Rule>) -> 
                         .context("mmap_section_address extraction")?,
                     )
             }
-            Rule::mmap_section_size => section_size = pair.into_inner().next(),
+            Rule::mmap_section_size => {
+                section_size = match pair.into_inner().next() {
+                    Some(pair) => {
+                        Some(hex_number_to_u64(pair).context("mmap_section_size extraction")?)
+                    }
+                    None => None,
+                }
+            }
             Rule::mmap_source => source = Some(pair.as_str()),
             _ => {}
         }
@@ -121,6 +128,14 @@ fn process_mmap_section(state: &mut MapFileParseState, contents: Pair<Rule>) -> 
         // [!provide] doesn't set an address
         return Ok(());
     };
+
+    if let Some(section_name) = section_name {
+        let section_size =
+            section_size.ok_or_else(|| pest_error(span, "Named sections must have a size"))?;
+        if section_name.contains("*fill*") {
+            state.out.padding += section_size;
+        }
+    }
 
     if let Some(mut c) = state.current_symbol.take() {
         if address < c.address {
