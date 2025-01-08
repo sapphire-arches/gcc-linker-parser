@@ -23,8 +23,6 @@ fn main() -> Result<()> {
         .next()
         .ok_or_else(|| anyhow!("Missing new file name"))?;
 
-    println!("{:?} {:?}", a_maps, b_maps);
-
     let a_maps = symbol_sizes(a_maps.into()).context("Parse baseline")?;
     let b_maps = symbol_sizes(b_maps.into()).context("Parse new")?;
 
@@ -40,6 +38,7 @@ fn main() -> Result<()> {
         .collect();
 
     let mut all_symbol_names: Vec<_> = a_symbols.keys().chain(b_symbols.keys()).collect();
+    // all_symbol_names.sort();
     all_symbol_names.sort_by_key(|symbol| {
         let symbol: &str = symbol.as_ref();
         let os: i64 = a_symbols.get(symbol).copied().unwrap_or_default() as i64;
@@ -49,6 +48,30 @@ fn main() -> Result<()> {
     });
     all_symbol_names.dedup();
 
+    println!("Symbol\tOld Size\tNew Size\t Delta");
+    for symbol in all_symbol_names {
+        let symbol_strip = symbol.trim();
+        match (a_symbols.get(symbol), b_symbols.get(symbol)) {
+            (None, None) => {
+                unreachable!();
+            }
+            (None, Some(ns)) => {
+                println!("{symbol_strip}\t0\t{ns}\t{ns}");
+            }
+            (Some(os), None) => {
+                println!("{symbol_strip}\t{os}\t0\t-{os}");
+            }
+            (Some(os), Some(ns)) => {
+                if os > ns {
+                    println!("{symbol_strip}\t{os}\t{ns}\t-{}", os - ns);
+                } else if ns < os {
+                    println!("{symbol_strip}\t{os}\t{ns}\t{}", ns - os);
+                }
+            }
+        }
+    }
+
+    /*
     for symbol in all_symbol_names {
         match (a_symbols.get(symbol), b_symbols.get(symbol)) {
             (None, None) => {
@@ -69,22 +92,23 @@ fn main() -> Result<()> {
             }
         }
     }
+    */
 
     let a_total_size: u64 = a_symbols.values().sum();
     let b_total_size: u64 = b_symbols.values().sum();
 
-    println!(
-        "Total size delta: {} -> {}  change: {}",
-        a_total_size,
-        b_total_size,
-        b_total_size as i64 - a_total_size as i64
-    );
-    println!(
-        "Padding delta: {} -> {}  change: {}",
-        a_maps.padding,
-        b_maps.padding,
-        b_maps.padding as i64 - a_maps.padding as i64
-    );
+    // println!(
+    //     "Total size delta: {} -> {}  change: {}",
+    //     a_total_size,
+    //     b_total_size,
+    //     b_total_size as i64 - a_total_size as i64
+    // );
+    // println!(
+    //     "Padding delta: {} -> {}  change: {}",
+    //     a_maps.padding,
+    //     b_maps.padding,
+    //     b_maps.padding as i64 - a_maps.padding as i64
+    // );
 
     Ok(())
 }
